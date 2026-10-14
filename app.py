@@ -7,7 +7,7 @@ import streamlit as st
 
 # إعداد الصفحة
 st.set_page_config(
-    page_title="مرشد الرسائل الآمن",
+    page_title="المرشد الرسائل الآمن",
     page_icon="🛡️",
     layout="centered"
 )
