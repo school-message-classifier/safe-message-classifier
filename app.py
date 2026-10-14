@@ -7,7 +7,7 @@ import streamlit as st
 
 # إعداد الصفحة
 st.set_page_config(
-    page_title="المرشد الرسائل الآمن",
+    page_title="مرشد الرسائل الآمن",
     page_icon="🛡️",
     layout="centered"
 )
@@ -75,7 +75,7 @@ def extract_links(text):
 
 
 # واجهة التطبيق
-st.title("🛡️ المرشد الرسائل الآمن")
+st.title("🛡️ مرشد الرسائل الآمن")
 
 st.write(
     "أدخل رسالة وصلتك لمعرفة تصنيفها والإرشادات المناسبة "
