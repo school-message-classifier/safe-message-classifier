@@ -12,15 +12,24 @@ st.set_page_config(
     layout="centered"
 )
 
-# الفئات التي سيكشف عنها النموذج
-LABELS = [
-    "نص تصيد",
-    "طلب وصول غير مصرح به",
-    "رابط مشبوه"
-]
+# الأصناف المعتمدة في بيانات التدريب
+LABELS = ["آمن", "خطير", "تحقق"]
 
-# حد عرض المؤشر، قابل للتعديل بعد تقييم النموذج
-THRESHOLD = 0.50
+# إرشادات ثابتة مرتبطة بكل صنف
+GUIDANCE = {
+    "آمن": (
+        "لا تظهر مؤشرات خطر واضحة في النص، "
+        "لكن هذا لا يضمن سلامة الرسالة."
+    ),
+    "خطير": (
+        "لا تنفذ الطلب المشبوه، ولا تشارك بياناتك أو رموز التحقق. "
+        "تحقق من الجهة عبر قناة رسمية مستقلة."
+    ),
+    "تحقق": (
+        "تحقق من هوية المرسل وسبب الرسالة عبر التطبيق أو الموقع الرسمي. "
+        " لا تعتمد على رقم المرسل وحده، ولا تفتح الرابط الوارد أو تشارك رموزا."
+    )
+}
 
 # تحميل النموذج
 MODEL_PATH = Path("model.joblib")
@@ -60,25 +69,24 @@ st.markdown("""
 
 
 def extract_links(text):
-    """استخراج الروابط المكتوبة في الرسالة دون فتحها."""
+    """استخراج الروابط الظاهرة دون فتحها."""
     pattern = r'(?i)\b(?:https?://|www\.)[^\s<>"\']+'
     return re.findall(pattern, text)
 
 
-# عنوان التطبيق
+# واجهة التطبيق
 st.title("🛡️ مرشد الرسائل الآمن")
 
 st.write(
-    "حلّل الرسائل الواردة وتعرّف على مؤشرات التصيّد "
-    "ومحاولات الوصول غير المصرح به والروابط المشبوهة."
+    "أدخل رسالة وصلتك لمعرفة تصنيفها والإرشادات المناسبة "
+    "للتعامل معها."
 )
 
 st.info(
-    "الصق نص الرسالة كما وصلك. لا تفتح الروابط أثناء التحليل؛ "
-    "التطبيق يفحص النص فقط ولا يتحقق من سلامة المواقع فعليًا."
+    "يحلل التطبيق نص الرسالة فقط. لا يفتح الروابط، "
+    "ولا يستطيع إثبات أن الرسالة أو الرابط آمن أو ضار."
 )
 
-# إدخال الرسالة
 with st.form("message_form"):
     message_text = st.text_area(
         "الرسالة الواردة",
@@ -91,156 +99,94 @@ with st.form("message_form"):
         use_container_width=True
     )
 
-# تحليل الرسالة
+# معالجة الرسالة
 if submitted:
     if not message_text.strip():
         st.warning("يرجى لصق الرسالة أولًا.")
 
+    elif model is None:
+        st.warning(
+            "لم يُربط نموذج التصنيف بعد. "
+            "درّبي النموذج واحفظيه باسم model.joblib."
+        )
+
     else:
-        links = extract_links(message_text)
+        try:
+            # استخراج الروابط دون زيارتها
+            links = extract_links(message_text)
 
-        st.subheader("نتيجة التحليل")
+            if links:
+                st.subheader("الروابط الموجودة في الرسالة")
+                for link in links:
+                    st.code(link, language=None)
 
-        if links:
-            st.write("**روابط عُثر عليها داخل النص:**")
-            for link in links:
-                st.code(link, language=None)
-            st.caption("تم استخراج الروابط نصيًا دون فتحها.")
-        else:
-            st.write("لم يُعثر على رابط واضح بالنمط المستخدم.")
+                st.caption("عُرضت الروابط كما وردت دون فتحها.")
 
-        if model is None:
-            st.warning(
-                "لم يُربط نموذج التصنيف بعد. "
-                "احفظ النموذج المدرّب باسم model.joblib "
-                "في مستودع المشروع."
-            )
-
-        else:
-            try:
-                # يتطلب هذا الكود نموذج تصنيف متعدد التسميات
-                # يعيد درجة مستقلة لكل فئة.
-                if not hasattr(model, "predict_proba"):
-                    st.error(
-                        "النموذج لا يدعم predict_proba. "
-                        "يجب إعداد نموذج مناسب لإظهار درجات الفئات."
-                    )
-
-                elif not hasattr(model, "classes_"):
-                    st.error(
-                        "تعذر التحقق من فئات النموذج. "
-                        "راجع طريقة تدريبه."
-                    )
-
-                else:
-                    model_classes = list(model.classes_)
-
-                    if set(model_classes) != set(LABELS):
-                        st.error(
-                            "فئات النموذج لا تطابق الفئات المعتمدة. "
-                            "أعد تدريب النموذج بهذه الفئات: "
-                            + "، ".join(LABELS)
-                        )
-
-                    else:
-                        probabilities = model.predict_proba(
-                            [message_text]
-                        )
-
-                        # يدعم OneVsRestClassifier متعدد التسميات
-                        # الذي يعيد مصفوفة درجات للفئات.
-                        if getattr(probabilities, "ndim", 0) != 2:
-                            st.error(
-                                "شكل نتائج النموذج غير متوافق. "
-                                "تحقق من أن النموذج متعدد التسميات."
-                            )
-
-                        elif probabilities.shape[1] != len(model_classes):
-                            st.error(
-                                "عدد درجات النموذج لا يطابق عدد الفئات."
-                            )
-
-                        else:
-                            scores = {
-                                label: float(probabilities[0][index])
-                                for index, label in enumerate(model_classes)
-                            }
-
-                            highest_score = max(scores.values())
-                            suspicious_labels = [
-                                label
-                                for label, score in scores.items()
-                                if score >= THRESHOLD
-                            ]
-
-                            st.markdown(
-                                '<div class="result-box">',
-                                unsafe_allow_html=True
-                            )
-
-                            st.metric(
-                                "أعلى مؤشر اشتباه تقديري",
-                                f"{highest_score * 100:.1f}%"
-                            )
-
-                            st.caption(
-                                "هذه درجة النموذج وليست احتمالًا مؤكدًا "
-                                "لأن الرسالة ضارة."
-                            )
-
-                            st.markdown("</div>", unsafe_allow_html=True)
-
-                            st.subheader("مؤشرات الاشتباه")
-
-                            for label in LABELS:
-                                score = scores[label]
-                                st.write(
-                                    f"**{label}** — "
-                                    f"{score * 100:.1f}%"
-                                )
-                                st.progress(
-                                    max(0.0, min(1.0, score))
-                                )
-
-                            if suspicious_labels:
-                                st.warning(
-                                    "مؤشرات تستحق الانتباه: "
-                                    + "، ".join(suspicious_labels)
-                                )
-                            else:
-                                st.success(
-                                    "لم تتجاوز أي فئة حد العرض المحدد. "
-                                    "هذا لا يثبت أن الرسالة آمنة."
-                                )
-
-                            st.subheader("إرشادات السلامة")
-
-                            if "نص تصيد" in suspicious_labels:
-                                st.write(
-                                    "- تحقق من هوية المرسل عبر قناة رسمية "
-                                    "قبل تنفيذ طلبه."
-                                )
-
-                            if "طلب وصول غير مصرح به" in suspicious_labels:
-                                st.write(
-                                    "- لا تشارك كلمات المرور أو رموز التحقق، "
-                                    "ولا تمنح صلاحيات دخول استجابةً لرسالة "
-                                    "غير موثوقة."
-                                )
-
-                            if "رابط مشبوه" in suspicious_labels:
-                                st.write(
-                                    "- لا تضغط على الرابط. افتح الموقع الرسمي "
-                                    "بكتابة عنوانه بنفسك عند الحاجة."
-                                )
-
-                            st.caption(
-                                "قد يخطئ النموذج أو يفوته اكتشاف الخطر. "
-                                "لم يتم فتح الروابط أو التحقق من محتواها."
-                            )
-
-            except Exception:
+            # التحقق من أصناف النموذج
+            if not hasattr(model, "classes_"):
                 st.error(
-                    "تعذر تحليل الرسالة. تحقق من توافق النموذج "
-                    "المحفوظ مع الكود وبيانات التدريب."
+                    "تعذر التحقق من أصناف النموذج. "
+                    "راجعي طريقة التدريب."
                 )
+
+            elif set(model.classes_) != set(LABELS):
+                st.error(
+                    "أصناف النموذج لا تطابق الأصناف المعتمدة: "
+                    + "، ".join(LABELS)
+                )
+
+            else:
+                # اختيار الصنف المتوقع
+                prediction = str(model.predict([message_text])[0])
+
+                st.subheader("نتيجة التحليل")
+
+                st.markdown(
+                    f"""
+                    <div class="result-box">
+                        <strong>صنف الرسالة: {prediction}</strong>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                st.subheader("التوجيهات")
+                st.write(GUIDANCE[prediction])
+
+                # عرض درجات الأصناف إن كان النموذج يدعمها
+                if hasattr(model, "predict_proba"):
+                    probabilities = model.predict_proba(
+                        [message_text]
+                    )[0]
+
+                    classes = list(model.classes_)
+                    scores = {
+                        str(label): float(score)
+                        for label, score in zip(classes, probabilities)
+                    }
+
+                    st.subheader("درجات الأصناف")
+
+                    for label in LABELS:
+                        st.write(
+                            f"**{label}:** {scores[label] * 100:.1f}%"
+                        )
+                        st.progress(
+                            max(0.0, min(1.0, scores[label]))
+                        )
+
+                    st.caption(
+                        "هذه درجات النموذج وليست احتمالات مؤكدة "
+                        "لخطورة الرسالة."
+                    )
+
+                st.caption(
+                    "قد يخطئ النموذج. عند الشك، تحققي من المرسل "
+                    "عبر قناة رسمية مستقلة."
+                )
+
+        except Exception:
+            st.error(
+                "تعذر تحليل الرسالة. تحققي من توافق النموذج "
+                "المحفوظ مع الواجهة."
+            )
